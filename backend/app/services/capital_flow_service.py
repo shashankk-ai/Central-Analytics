@@ -1,15 +1,20 @@
 """Capital Flow (CCC) pillar — currently DPO only, sourced from PO_Report.
 
-Column mapping confirmed with the business:
-  PO date            -> "Take Order Orddate"
-  PO value           -> "NEW LineNet"
+Column mapping confirmed with the business (verified against the live
+PO_Report schema on 2026-07-13 — several of the business's plain-English
+names didn't match the actual Zoho column names, e.g. "NEW LineNet" is
+really "Linenet in INR"):
+  PO date            -> "OrderDate"
+  PO value           -> "Linenet in INR" (currency-normalized; PO_Report
+                         also has a raw "Linenet" in the vendor's original
+                         currency, which would be wrong to sum directly)
   Business vertical  -> "Dimension"
   Product            -> "Description"
   Payment term       -> "Terms Description"
-  Supplier            -> "PO Vendor Name"
-  Row filter columns  -> "itemkey", "PONO"
+  Supplier           -> "Vendname"
+  Row filter columns -> "ItemKey", "PONO"
 
-Row filter: exclude rows where itemkey is blank, or PONO starts with "RE"
+Row filter: exclude rows where ItemKey is blank, or PONO starts with "RE"
 (a return, not a purchase order) instead of "PO".
 """
 
@@ -23,13 +28,13 @@ from app.connectors.zoho import ZohoAnalyticsConnector
 
 PO_REPORT_VIEW_ID = "398702000006337002"
 
-COL_PO_DATE = "Take Order Orddate"
-COL_PO_VALUE = "NEW LineNet"
+COL_PO_DATE = "OrderDate"
+COL_PO_VALUE = "Linenet in INR"
 COL_BUSINESS_VERTICAL = "Dimension"
 COL_PRODUCT = "Description"
 COL_PAYMENT_TERM = "Terms Description"
-COL_SUPPLIER = "PO Vendor Name"
-COL_ITEMKEY = "itemkey"
+COL_SUPPLIER = "Vendname"
+COL_ITEMKEY = "ItemKey"
 COL_PONO = "PONO"
 
 PO_REPORT_COLUMNS = [

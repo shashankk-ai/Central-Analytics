@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { PILLARS } from '@/types/common'
 
 const PHASE_STATUS: Record<string, { label: string; variant: 'outline' | 'secondary' }> = {
-  'capital-flow': { label: 'Phase 1 · awaiting data spec', variant: 'secondary' },
+  'capital-flow': { label: 'Phase 1 · DPO live (DSO/DIO pending)', variant: 'secondary' },
   'sales-vs-aop': { label: 'Phase 2 · not started', variant: 'outline' },
   'margin-vs-aop': { label: 'Phase 3 · not started', variant: 'outline' },
   'expense-vs-aop': { label: 'Phase 4 · not started', variant: 'outline' },

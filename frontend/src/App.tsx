@@ -1,6 +1,7 @@
 import { Route, Routes } from 'react-router-dom'
 import { AppShell } from '@/components/layout/AppShell'
 import { OverviewPage } from '@/pages/OverviewPage'
+import { CapitalFlowPage } from '@/pages/CapitalFlowPage'
 import { PillarPlaceholder } from '@/pages/PillarPlaceholder'
 import { PILLARS } from '@/types/common'
 
@@ -9,7 +10,8 @@ function App() {
     <AppShell>
       <Routes>
         <Route path="/" element={<OverviewPage />} />
-        {PILLARS.map((pillar) => (
+        <Route path="/capital-flow" element={<CapitalFlowPage />} />
+        {PILLARS.filter((pillar) => pillar.id !== 'capital-flow').map((pillar) => (
           <Route
             key={pillar.id}
             path={pillar.route}
