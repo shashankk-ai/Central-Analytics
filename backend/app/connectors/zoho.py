@@ -5,6 +5,8 @@ Docs: https://www.zoho.com/analytics/api/v2/
 
 from __future__ import annotations
 
+import asyncio
+import json
 import time
 
 import httpx
@@ -94,15 +96,53 @@ class ZohoAnalyticsConnector:
         )
         return response.json()
 
-    async def fetch_view_data(self, view_id: str, criteria: str | None = None) -> list[dict]:
-        """Fetches row data for a given view (table/query table) as a list of dicts."""
-        params = {"CONFIG": '{"responseFormat":"json"}'}
+    async def fetch_view_data(
+        self,
+        view_id: str,
+        selected_columns: list[str] | None = None,
+        criteria: str | None = None,
+        poll_interval: float = 2.0,
+        timeout: float = 180.0,
+    ) -> list[dict]:
+        """Fetches row data for a view via Zoho's async Bulk Export API —
+        required for any view too large for a synchronous export (e.g.
+        PO_Report). Creates an export job, polls until complete, then
+        downloads and parses the JSON result.
+        """
+        workspace_id = self._settings.zoho_workspace_id
+        config: dict = {"responseFormat": "json"}
+        if selected_columns:
+            config["selectedColumns"] = selected_columns
         if criteria:
-            params["CONFIG"] = f'{{"responseFormat":"json","criteria":"{criteria}"}}'
-        response = await self._request(
+            config["criteria"] = criteria
+
+        create_response = await self._request(
             "GET",
-            f"/restapi/v2/workspaces/{self._settings.zoho_workspace_id}/views/{view_id}/data",
-            params=params,
+            f"/restapi/v2/bulk/workspaces/{workspace_id}/views/{view_id}/data",
+            params={"CONFIG": json.dumps(config)},
         )
-        payload = response.json()
+        job_id = create_response.json()["data"]["jobId"]
+
+        deadline = time.monotonic() + timeout
+        job_status = ""
+        while time.monotonic() < deadline:
+            status_response = await self._request(
+                "GET",
+                f"/restapi/v2/bulk/workspaces/{workspace_id}/exportjobs/{job_id}",
+            )
+            job_data = status_response.json()["data"]
+            job_status = job_data.get("jobStatus", "")
+            if job_status == "JOB COMPLETED":
+                break
+            if job_status in ("JOB FAILED", "FAILED"):
+                raise ZohoApiError(f"Zoho export job {job_id} for view {view_id} failed: {job_data}")
+            await asyncio.sleep(poll_interval)
+        else:
+            raise ZohoApiError(f"Zoho export job {job_id} for view {view_id} did not complete within {timeout}s (last status: {job_status})")
+
+        data_response = await self._request(
+            "GET",
+            f"/restapi/v2/bulk/workspaces/{workspace_id}/exportjobs/{job_id}/data",
+        )
+        payload = data_response.json()
         return payload.get("data", [])

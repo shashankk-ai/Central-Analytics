@@ -1,86 +1,63 @@
-"""Payment terms master: the lookup table that resolves a raw payment-term
-string (as it appears on a PO) to a number of payable days for DPO.
+"""Payment Terms Master: resolves a raw payment-term description (as it
+appears in PO_Report's "Terms Description" column) to a weighted payable
+days figure and a DPO instrument classification (Clean Credit / Advance /
+LC / DA), for use in the DPO calculation.
 
-Terms not present in the master are "unknown" and must be surfaced to the
-user via the Unknown Payment Term Protocol rather than silently dropped or
-guessed at.
+Persisted in the app's own SQLite database (not Zoho) so it can be edited
+freely at any time, per the build brief's Unknown Payment Term Protocol.
 """
 
 from __future__ import annotations
 
-import re
+from datetime import datetime
 
 from pydantic import BaseModel
+from sqlalchemy import Boolean, DateTime, Float, String, func
+from sqlalchemy.orm import Mapped, mapped_column
 
-_STANDARD_TERM = re.compile(r"^\s*net\s*(\d+)\s*$", re.IGNORECASE)
-_TWO_STEP_TERM = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*/\s*(\d+)\s+net\s*(\d+)\s*$", re.IGNORECASE)
+from app.models.db import Base
 
-
-class PaymentTermEntry(BaseModel):
-    term: str
-    payable_days: float
-    is_two_step: bool = False
-    discount_days: int | None = None
-    base_days: int | None = None
+INSTRUMENTS = ("Clean Credit", "Advance", "LC", "DA")
 
 
-class UnknownPaymentTerm(BaseModel):
-    term: str
-    affected_po_value: float
-    affected_po_count: int
+class PaymentTerm(Base):
+    __tablename__ = "payment_terms"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    termskey: Mapped[str | None] = mapped_column(String, nullable=True)
+    terms_description: Mapped[str] = mapped_column(String, nullable=False)
+    normalized_description: Mapped[str] = mapped_column(String, unique=True, index=True, nullable=False)
+    instrument: Mapped[str | None] = mapped_column(String, nullable=True)
+    weighted_payable_days: Mapped[float] = mapped_column(Float, nullable=False)
+    calculation_trace: Mapped[str | None] = mapped_column(String, nullable=True)
+    remarks: Mapped[str | None] = mapped_column(String, nullable=True)
+    source: Mapped[str] = mapped_column(String, nullable=False)  # "seed" | "auto" | "manual"
+    needs_review: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
-class PaymentTermsMaster:
-    """In-memory lookup of payment-term string -> resolved payable days.
+class PaymentTermOut(BaseModel):
+    id: int
+    termskey: str | None
+    terms_description: str
+    instrument: str | None
+    weighted_payable_days: float
+    calculation_trace: str | None
+    remarks: str | None
+    source: str
+    needs_review: bool
+    updated_at: datetime
 
-    Phase 1 will back this with the actual master dataset (Excel or Zoho
-    Analytics table, location TBD) once the user confirms where it lives.
-    """
-
-    def __init__(self, entries: dict[str, PaymentTermEntry] | None = None) -> None:
-        self._entries: dict[str, PaymentTermEntry] = entries or {}
-
-    def resolve(self, term: str) -> PaymentTermEntry | None:
-        return self._entries.get(_normalize(term))
-
-    def add(self, entry: PaymentTermEntry) -> None:
-        self._entries[_normalize(entry.term)] = entry
-
-    def all(self) -> list[PaymentTermEntry]:
-        return list(self._entries.values())
+    model_config = {"from_attributes": True}
 
 
-def _normalize(term: str) -> str:
-    return " ".join(term.strip().lower().split())
+class PaymentTermUpsert(BaseModel):
+    terms_description: str
+    instrument: str
+    weighted_payable_days: float
+    remarks: str | None = None
 
 
-def suggest_payable_days(term: str, early_pay_rate: float = 0.35) -> PaymentTermEntry | None:
-    """Auto-suggests payable days for a common term pattern.
-
-    Recognizes:
-      - Standard terms, e.g. "Net 30" -> 30 payable days.
-      - Two-step early-payment terms, e.g. "2/10 Net 30" ->
-        Effective Days = early_pay_rate * discount_days + (1 - early_pay_rate) * base_days.
-
-    Returns None if the term does not match either pattern — the caller
-    must then treat it as unknown and prompt the user for the payable days.
-    """
-    two_step = _TWO_STEP_TERM.match(term)
-    if two_step:
-        discount_days = int(two_step.group(2))
-        base_days = int(two_step.group(3))
-        effective_days = early_pay_rate * discount_days + (1 - early_pay_rate) * base_days
-        return PaymentTermEntry(
-            term=term,
-            payable_days=effective_days,
-            is_two_step=True,
-            discount_days=discount_days,
-            base_days=base_days,
-        )
-
-    standard = _STANDARD_TERM.match(term)
-    if standard:
-        base_days = int(standard.group(1))
-        return PaymentTermEntry(term=term, payable_days=float(base_days), is_two_step=False, base_days=base_days)
-
-    return None
+def normalize_description(text: str) -> str:
+    return " ".join(text.strip().lower().split())

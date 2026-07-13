@@ -4,49 +4,75 @@ import pandas as pd
 import pytest
 
 from app.calculators.ccc import compute_ccc, compute_dio, compute_dpo, compute_dso
-from app.models.payment_terms import PaymentTermsMaster, suggest_payable_days
+from app.models.payment_terms import PaymentTermUpsert
+from app.services.payment_terms_service import upsert_manual
 
 
-def test_suggest_payable_days_standard_term():
-    entry = suggest_payable_days("Net 30")
-    assert entry is not None
-    assert entry.payable_days == 30
-    assert entry.is_two_step is False
-
-
-def test_suggest_payable_days_two_step_term_default_rate():
-    entry = suggest_payable_days("2/10 Net 30", early_pay_rate=0.35)
-    assert entry is not None
-    assert entry.is_two_step is True
-    # 0.35 * 10 + 0.65 * 30 = 3.5 + 19.5 = 23.0
-    assert entry.payable_days == pytest.approx(23.0)
-
-
-def test_suggest_payable_days_unrecognized_term_returns_none():
-    assert suggest_payable_days("Whenever convenient") is None
-
-
-def test_compute_dpo_weighted_average_and_unknown_term_flagging():
-    master = PaymentTermsMaster()
-    master.add(suggest_payable_days("Net 30"))
-    master.add(suggest_payable_days("Net 60"))
+def test_compute_dpo_weighted_average_with_known_terms(db_session):
+    upsert_manual(
+        db_session,
+        PaymentTermUpsert(terms_description="30 Days PDC", instrument="Clean Credit", weighted_payable_days=30),
+    )
+    upsert_manual(
+        db_session,
+        PaymentTermUpsert(terms_description="60 Days PDC", instrument="Clean Credit", weighted_payable_days=60),
+    )
 
     po_df = pd.DataFrame(
         {
-            "po_value": [100_000, 300_000, 50_000],
-            "payment_term": ["Net 30", "Net 60", "Net 90"],  # Net 90 is unknown
+            "po_value": [100_000, 300_000],
+            "payment_term": ["30 Days PDC", "60 Days PDC"],
         }
     )
 
-    result = compute_dpo(po_df, master, value_col="po_value", term_col="payment_term")
+    result = compute_dpo(po_df, db_session, value_col="po_value", term_col="payment_term")
 
     # DPO = (100000*30 + 300000*60) / (100000+300000) = 21,000,000 / 400,000 = 52.5
     assert result.dpo == pytest.approx(52.5)
-    assert result.included_po_value == pytest.approx(400_000)
-    assert result.excluded_po_value == pytest.approx(50_000)
-    assert len(result.unknown_terms) == 1
-    assert result.unknown_terms[0].term == "Net 90"
-    assert result.unknown_terms[0].affected_po_value == pytest.approx(50_000)
+    assert result.total_po_value == pytest.approx(400_000)
+    assert result.terms_needing_review == []
+
+
+def test_compute_dpo_auto_creates_and_flags_unknown_term(db_session):
+    upsert_manual(
+        db_session,
+        PaymentTermUpsert(terms_description="30 Days PDC", instrument="Clean Credit", weighted_payable_days=30),
+    )
+
+    po_df = pd.DataFrame(
+        {
+            "po_value": [100_000, 50_000],
+            "payment_term": ["30 Days PDC", "20% Advance and 80% after 90 days"],
+        }
+    )
+
+    result = compute_dpo(po_df, db_session, value_col="po_value", term_col="payment_term")
+
+    # New term auto-calculated as 20%x0 + 80%x90 /100 = 72.0
+    # DPO = (100000*30 + 50000*72) / 150000 = (3,000,000 + 3,600,000) / 150,000 = 44.0
+    assert result.dpo == pytest.approx(44.0)
+    assert len(result.terms_needing_review) == 1
+    flagged = result.terms_needing_review[0]
+    assert flagged.terms_description == "20% Advance and 80% after 90 days"
+    assert flagged.weighted_payable_days == pytest.approx(72.0)
+    assert flagged.affected_po_value == pytest.approx(50_000)
+    assert flagged.newly_auto_created is True
+
+
+def test_compute_dpo_excludes_blank_payment_term(db_session):
+    po_df = pd.DataFrame(
+        {
+            "po_value": [100_000, 25_000],
+            "payment_term": ["30 Days PDC", None],
+        }
+    )
+
+    result = compute_dpo(po_df, db_session, value_col="po_value", term_col="payment_term")
+
+    assert result.dpo == pytest.approx(30.0)
+    assert result.total_po_value == pytest.approx(100_000)
+    assert result.blank_term_po_value == pytest.approx(25_000)
+    assert result.blank_term_po_count == 1
 
 
 def test_compute_dso_weighted_average_with_uncollected_invoice():

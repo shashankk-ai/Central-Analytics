@@ -13,15 +13,25 @@ from datetime import date, datetime
 
 import pandas as pd
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
-from app.models.payment_terms import PaymentTermsMaster, UnknownPaymentTerm
+from app.services.payment_terms_service import resolve_or_autocreate
+
+
+class TermNeedingReview(BaseModel):
+    terms_description: str
+    weighted_payable_days: float
+    affected_po_value: float
+    affected_po_count: int
+    newly_auto_created: bool
 
 
 class DpoResult(BaseModel):
     dpo: float | None
-    included_po_value: float
-    excluded_po_value: float
-    unknown_terms: list[UnknownPaymentTerm]
+    total_po_value: float
+    blank_term_po_value: float
+    blank_term_po_count: int
+    terms_needing_review: list[TermNeedingReview]
 
 
 class DsoResult(BaseModel):
@@ -38,38 +48,51 @@ class CccResult(BaseModel):
 
 def compute_dpo(
     po_df: pd.DataFrame,
-    terms_master: PaymentTermsMaster,
+    db: Session,
     value_col: str,
     term_col: str,
 ) -> DpoResult:
-    """DPO = SUM(PO Value x Payable Days) / SUM(PO Value), excluding rows
-    whose payment term is not in the master (flagged as unknown, not
-    silently dropped without a trace)."""
-    resolved_days = po_df[term_col].map(lambda term: terms_master.resolve(term))
-    is_known = resolved_days.notna()
+    """DPO = SUM(PO Value x Payable Days) / SUM(PO Value).
 
-    known_df = po_df[is_known]
-    known_days = resolved_days[is_known].map(lambda entry: entry.payable_days)
-    included_value = float(known_df[value_col].sum())
-    weighted_days = float((known_df[value_col] * known_days).sum())
-    dpo = weighted_days / included_value if included_value > 0 else None
+    Every distinct payment term in `po_df` is resolved against the
+    persistent Payment Terms Master; a term seen for the first time is
+    auto-calculated from its text (see payment_term_parser) and inserted
+    immediately, flagged for review, so a single new term never blocks or
+    excludes rows from the calculation. Rows with a blank payment term are
+    excluded and reported separately, since there's no text to resolve.
+    """
+    has_term = po_df[term_col].notna() & (po_df[term_col].astype(str).str.strip() != "")
+    blank_df = po_df[~has_term]
+    scoped_df = po_df[has_term]
 
-    unknown_df = po_df[~is_known]
-    excluded_value = float(unknown_df[value_col].sum())
-    unknown_terms = [
-        UnknownPaymentTerm(
-            term=term,
-            affected_po_value=float(group[value_col].sum()),
-            affected_po_count=int(len(group)),
-        )
-        for term, group in unknown_df.groupby(term_col)
-    ]
+    resolved_days: dict[str, float] = {}
+    needing_review: list[TermNeedingReview] = []
+    for term in scoped_df[term_col].unique():
+        payment_term, newly_created = resolve_or_autocreate(db, term)
+        resolved_days[term] = payment_term.weighted_payable_days
+        if payment_term.needs_review:
+            group = scoped_df[scoped_df[term_col] == term]
+            needing_review.append(
+                TermNeedingReview(
+                    terms_description=term,
+                    weighted_payable_days=payment_term.weighted_payable_days,
+                    affected_po_value=float(group[value_col].sum()),
+                    affected_po_count=int(len(group)),
+                    newly_auto_created=newly_created,
+                )
+            )
+
+    days_series = scoped_df[term_col].map(resolved_days)
+    total_value = float(scoped_df[value_col].sum())
+    weighted_days = float((scoped_df[value_col] * days_series).sum())
+    dpo = weighted_days / total_value if total_value > 0 else None
 
     return DpoResult(
         dpo=dpo,
-        included_po_value=included_value,
-        excluded_po_value=excluded_value,
-        unknown_terms=unknown_terms,
+        total_po_value=total_value,
+        blank_term_po_value=float(blank_df[value_col].sum()),
+        blank_term_po_count=int(len(blank_df)),
+        terms_needing_review=needing_review,
     )
 
 
