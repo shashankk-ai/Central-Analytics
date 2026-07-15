@@ -2,12 +2,13 @@ import { useQuery } from '@tanstack/react-query'
 import { apiGet } from '@/api/client'
 
 interface FilterOptions {
+  business_verticals: string[]
   products: string[]
   suppliers: string[]
   customers: string[]
 }
 
-const EMPTY_OPTIONS: FilterOptions = { products: [], suppliers: [], customers: [] }
+const EMPTY_OPTIONS: FilterOptions = { business_verticals: [], products: [], suppliers: [], customers: [] }
 
 export function useFilterOptions() {
   const query = useQuery({

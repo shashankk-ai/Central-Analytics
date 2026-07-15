@@ -6,12 +6,22 @@ export interface TermNeedingReview {
   newly_auto_created: boolean
 }
 
+export interface InstrumentBifurcation {
+  instrument: string
+  po_value: number
+  weighted_payable_days: number | null
+  share_of_total_value_pct: number
+}
+
 export interface DpoResult {
   dpo: number | null
   total_po_value: number
   blank_term_po_value: number
   blank_term_po_count: number
+  ar_ap_excluded_po_value: number
+  ar_ap_excluded_po_count: number
   terms_needing_review: TermNeedingReview[]
+  by_instrument: InstrumentBifurcation[]
 }
 
 export interface PaymentTermOut {
@@ -24,5 +34,14 @@ export interface PaymentTermOut {
   remarks: string | null
   source: string
   needs_review: boolean
+  excluded_from_dpo: boolean
   updated_at: string
+}
+
+export interface DpoFilters {
+  date_from?: string | null
+  date_to?: string | null
+  business_verticals?: string[]
+  products?: string[]
+  suppliers?: string[]
 }

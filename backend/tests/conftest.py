@@ -3,6 +3,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.models.db import Base
+from app.models.excluded_vendors import ExcludedVendor  # noqa: F401 — registers the table
 from app.models.payment_terms import PaymentTerm  # noqa: F401 — registers the table
 
 

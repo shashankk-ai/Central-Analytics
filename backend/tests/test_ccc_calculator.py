@@ -75,6 +75,65 @@ def test_compute_dpo_excludes_blank_payment_term(db_session):
     assert result.blank_term_po_count == 1
 
 
+def test_compute_dpo_excludes_ar_ap_term_and_reports_separately(db_session):
+    upsert_manual(
+        db_session,
+        PaymentTermUpsert(terms_description="30 Days PDC", instrument="Clean Credit", weighted_payable_days=30),
+    )
+    upsert_manual(
+        db_session,
+        PaymentTermUpsert(
+            terms_description="AR/AP Knock Off",
+            instrument="Clean Credit",
+            weighted_payable_days=0,
+            excluded_from_dpo=True,
+        ),
+    )
+
+    po_df = pd.DataFrame(
+        {
+            "po_value": [100_000, 40_000],
+            "payment_term": ["30 Days PDC", "AR/AP Knock Off"],
+        }
+    )
+
+    result = compute_dpo(po_df, db_session, value_col="po_value", term_col="payment_term")
+
+    assert result.dpo == pytest.approx(30.0)
+    assert result.total_po_value == pytest.approx(100_000)
+    assert result.ar_ap_excluded_po_value == pytest.approx(40_000)
+    assert result.ar_ap_excluded_po_count == 1
+
+
+def test_compute_dpo_by_instrument_bifurcation(db_session):
+    upsert_manual(
+        db_session,
+        PaymentTermUpsert(terms_description="30 Days PDC", instrument="Clean Credit", weighted_payable_days=30),
+    )
+    upsert_manual(
+        db_session,
+        PaymentTermUpsert(terms_description="90 Days LC", instrument="LC", weighted_payable_days=90),
+    )
+
+    po_df = pd.DataFrame(
+        {
+            "po_value": [300_000, 100_000],
+            "payment_term": ["30 Days PDC", "90 Days LC"],
+        }
+    )
+
+    result = compute_dpo(po_df, db_session, value_col="po_value", term_col="payment_term")
+
+    by_instrument = {b.instrument: b for b in result.by_instrument}
+    assert set(by_instrument) == {"Clean Credit", "LC"}
+    assert by_instrument["Clean Credit"].po_value == pytest.approx(300_000)
+    assert by_instrument["Clean Credit"].weighted_payable_days == pytest.approx(30.0)
+    assert by_instrument["Clean Credit"].share_of_total_value_pct == pytest.approx(75.0)
+    assert by_instrument["LC"].po_value == pytest.approx(100_000)
+    assert by_instrument["LC"].weighted_payable_days == pytest.approx(90.0)
+    assert by_instrument["LC"].share_of_total_value_pct == pytest.approx(25.0)
+
+
 def test_compute_dso_weighted_average_with_uncollected_invoice():
     invoice_df = pd.DataFrame(
         {

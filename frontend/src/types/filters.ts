@@ -17,6 +17,3 @@ export interface GlobalFilters {
   suppliers: string[]
   customers: string[]
 }
-
-export const BUSINESS_VERTICALS = ['Pharma', 'Agro', 'F&F', 'Industrial', 'Personal Care'] as const
-export type BusinessVertical = (typeof BUSINESS_VERTICALS)[number]

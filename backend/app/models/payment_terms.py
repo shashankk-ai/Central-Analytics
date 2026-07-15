@@ -33,6 +33,7 @@ class PaymentTerm(Base):
     remarks: Mapped[str | None] = mapped_column(String, nullable=True)
     source: Mapped[str] = mapped_column(String, nullable=False)  # "seed" | "auto" | "manual"
     needs_review: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    excluded_from_dpo: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
 
@@ -47,6 +48,7 @@ class PaymentTermOut(BaseModel):
     remarks: str | None
     source: str
     needs_review: bool
+    excluded_from_dpo: bool
     updated_at: datetime
 
     model_config = {"from_attributes": True}
@@ -57,6 +59,7 @@ class PaymentTermUpsert(BaseModel):
     instrument: str
     weighted_payable_days: float
     remarks: str | None = None
+    excluded_from_dpo: bool = False
 
 
 def normalize_description(text: str) -> str:

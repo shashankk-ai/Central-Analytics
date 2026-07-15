@@ -26,12 +26,22 @@ class TermNeedingReview(BaseModel):
     newly_auto_created: bool
 
 
+class InstrumentBifurcation(BaseModel):
+    instrument: str
+    po_value: float
+    weighted_payable_days: float | None
+    share_of_total_value_pct: float
+
+
 class DpoResult(BaseModel):
     dpo: float | None
     total_po_value: float
     blank_term_po_value: float
     blank_term_po_count: int
+    ar_ap_excluded_po_value: float
+    ar_ap_excluded_po_count: int
     terms_needing_review: list[TermNeedingReview]
+    by_instrument: list[InstrumentBifurcation]
 
 
 class DsoResult(BaseModel):
@@ -58,20 +68,22 @@ def compute_dpo(
     persistent Payment Terms Master; a term seen for the first time is
     auto-calculated from its text (see payment_term_parser) and inserted
     immediately, flagged for review, so a single new term never blocks or
-    excludes rows from the calculation. Rows with a blank payment term are
-    excluded and reported separately, since there's no text to resolve.
+    excludes rows from the calculation. Rows with a blank payment term, or
+    a term explicitly flagged `excluded_from_dpo` (e.g. AR/AP Knock Off —
+    a netting arrangement, not a real payable), are excluded and reported
+    separately rather than silently dropped.
     """
     has_term = po_df[term_col].notna() & (po_df[term_col].astype(str).str.strip() != "")
     blank_df = po_df[~has_term]
-    scoped_df = po_df[has_term]
+    with_term_df = po_df[has_term]
 
-    resolved_days: dict[str, float] = {}
+    resolved: dict[str, object] = {}
     needing_review: list[TermNeedingReview] = []
-    for term in scoped_df[term_col].unique():
+    for term in with_term_df[term_col].unique():
         payment_term, newly_created = resolve_or_autocreate(db, term)
-        resolved_days[term] = payment_term.weighted_payable_days
+        resolved[term] = payment_term
         if payment_term.needs_review:
-            group = scoped_df[scoped_df[term_col] == term]
+            group = with_term_df[with_term_df[term_col] == term]
             needing_review.append(
                 TermNeedingReview(
                     terms_description=term,
@@ -82,17 +94,40 @@ def compute_dpo(
                 )
             )
 
-    days_series = scoped_df[term_col].map(resolved_days)
+    is_ar_ap_excluded = with_term_df[term_col].map(lambda t: resolved[t].excluded_from_dpo)
+    ar_ap_df = with_term_df[is_ar_ap_excluded]
+    scoped_df = with_term_df[~is_ar_ap_excluded]
+
+    days_series = scoped_df[term_col].map(lambda t: resolved[t].weighted_payable_days)
     total_value = float(scoped_df[value_col].sum())
     weighted_days = float((scoped_df[value_col] * days_series).sum())
     dpo = weighted_days / total_value if total_value > 0 else None
+
+    instrument_series = scoped_df[term_col].map(lambda t: resolved[t].instrument or "Unclassified")
+    by_instrument: list[InstrumentBifurcation] = []
+    for instrument, group in scoped_df.assign(_instrument=instrument_series).groupby("_instrument"):
+        group_value = float(group[value_col].sum())
+        group_days = days_series.loc[group.index]
+        group_weighted_days = float((group[value_col] * group_days).sum()) / group_value if group_value > 0 else None
+        by_instrument.append(
+            InstrumentBifurcation(
+                instrument=instrument,
+                po_value=group_value,
+                weighted_payable_days=group_weighted_days,
+                share_of_total_value_pct=(group_value / total_value * 100) if total_value > 0 else 0.0,
+            )
+        )
+    by_instrument.sort(key=lambda b: b.po_value, reverse=True)
 
     return DpoResult(
         dpo=dpo,
         total_po_value=total_value,
         blank_term_po_value=float(blank_df[value_col].sum()),
         blank_term_po_count=int(len(blank_df)),
+        ar_ap_excluded_po_value=float(ar_ap_df[value_col].sum()),
+        ar_ap_excluded_po_count=int(len(ar_ap_df)),
         terms_needing_review=needing_review,
+        by_instrument=by_instrument,
     )
 
 

@@ -31,6 +31,6 @@ def get_db() -> Session:
 
 
 def init_db() -> None:
-    from app.models import payment_terms  # noqa: F401 — registers the model with Base
+    from app.models import excluded_vendors, payment_terms  # noqa: F401 — register models with Base
 
     Base.metadata.create_all(bind=engine)

@@ -1,7 +1,10 @@
+import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { AlertTriangle, CircleDashed, Info } from 'lucide-react'
+import { AlertTriangle, CircleDashed, FileSpreadsheet, Info } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { InstrumentBifurcationChart } from '@/components/charts/InstrumentBifurcationChart'
 import { useDpo } from '@/hooks/useDpo'
 import { formatDays, formatIndianCurrency } from '@/lib/format'
 
@@ -34,11 +37,22 @@ export function CapitalFlowPage() {
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-5">
-      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
-        <h2 className="font-heading text-2xl font-semibold">Days Payable Outstanding</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Company total · all-time · <span className="italic">time-period filtering not yet wired</span>
-        </p>
+      <motion.div
+        className="flex items-start justify-between gap-4"
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.25 }}
+      >
+        <div>
+          <h2 className="font-heading text-2xl font-semibold">Days Payable Outstanding</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Reflects the active filters above · job-work vendors and AR/AP netting excluded
+          </p>
+        </div>
+        <Button variant="outline" size="sm" className="gap-2" nativeButton={false} render={<Link to="/capital-flow/payment-terms" />}>
+          <FileSpreadsheet className="h-3.5 w-3.5" />
+          Payment Terms Master
+        </Button>
       </motion.div>
 
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25, delay: 0.05 }}>
@@ -52,8 +66,19 @@ export function CapitalFlowPage() {
         </Card>
       </motion.div>
 
+      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25, delay: 0.08 }}>
+        <Card className="glass-panel border-0">
+          <CardHeader>
+            <CardTitle className="font-heading text-base">Instrument-wise bifurcation</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <InstrumentBifurcationChart data={data.by_instrument} />
+          </CardContent>
+        </Card>
+      </motion.div>
+
       <motion.div
-        className="grid grid-cols-1 gap-4 sm:grid-cols-2"
+        className="grid grid-cols-1 gap-4 sm:grid-cols-3"
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.25, delay: 0.1 }}
@@ -75,14 +100,29 @@ export function CapitalFlowPage() {
           <CardHeader className="flex flex-row items-center gap-2 space-y-0">
             <Info className="h-4 w-4 text-amber-500" />
             <CardTitle className="font-mono text-xs uppercase tracking-widest text-muted-foreground">
-              Blank payment term (excluded)
+              Blank payment term
             </CardTitle>
           </CardHeader>
           <CardContent>
             <span className="font-mono text-2xl font-medium tabular-nums text-amber-600 dark:text-amber-400">
               {formatIndianCurrency(data.blank_term_po_value)}
             </span>
-            <span className="ml-2 text-sm text-muted-foreground">({data.blank_term_po_count} rows)</span>
+            <span className="ml-2 text-sm text-muted-foreground">({data.blank_term_po_count})</span>
+          </CardContent>
+        </Card>
+
+        <Card className="glass-panel border-0">
+          <CardHeader className="flex flex-row items-center gap-2 space-y-0">
+            <Info className="h-4 w-4 text-amber-500" />
+            <CardTitle className="font-mono text-xs uppercase tracking-widest text-muted-foreground">
+              AR/AP netting excluded
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <span className="font-mono text-2xl font-medium tabular-nums text-amber-600 dark:text-amber-400">
+              {formatIndianCurrency(data.ar_ap_excluded_po_value)}
+            </span>
+            <span className="ml-2 text-sm text-muted-foreground">({data.ar_ap_excluded_po_count})</span>
           </CardContent>
         </Card>
       </motion.div>

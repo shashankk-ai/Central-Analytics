@@ -46,6 +46,7 @@ def upsert_seed_row(
     weighted_payable_days: float,
     calculation_trace: str | None,
     remarks: str | None,
+    excluded_from_dpo: bool = False,
 ) -> PaymentTerm:
     normalized = normalize_description(terms_description)
     existing = db.scalar(select(PaymentTerm).where(PaymentTerm.normalized_description == normalized))
@@ -57,6 +58,7 @@ def upsert_seed_row(
         existing.remarks = remarks
         existing.source = "seed"
         existing.needs_review = False
+        existing.excluded_from_dpo = excluded_from_dpo
         db.commit()
         db.refresh(existing)
         return existing
@@ -71,6 +73,7 @@ def upsert_seed_row(
         remarks=remarks,
         source="seed",
         needs_review=False,
+        excluded_from_dpo=excluded_from_dpo,
     )
     db.add(term)
     db.commit()
@@ -87,6 +90,7 @@ def upsert_manual(db: Session, payload: PaymentTermUpsert) -> PaymentTerm:
         existing.remarks = payload.remarks
         existing.source = "manual"
         existing.needs_review = False
+        existing.excluded_from_dpo = payload.excluded_from_dpo
         db.commit()
         db.refresh(existing)
         return existing
@@ -101,6 +105,7 @@ def upsert_manual(db: Session, payload: PaymentTermUpsert) -> PaymentTerm:
         remarks=payload.remarks,
         source="manual",
         needs_review=False,
+        excluded_from_dpo=payload.excluded_from_dpo,
     )
     db.add(term)
     db.commit()

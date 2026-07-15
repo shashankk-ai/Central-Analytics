@@ -5,7 +5,6 @@ import { TimePeriodPicker } from '@/components/filters/TimePeriodPicker'
 import { SearchableMultiSelect } from '@/components/filters/SearchableMultiSelect'
 import { useFilterStore } from '@/store/filterStore'
 import { useFilterOptions } from '@/hooks/useFilterOptions'
-import { BUSINESS_VERTICALS } from '@/types/filters'
 
 export function FilterBar() {
   const { filters, setBusinessVerticals, setProducts, setSuppliers, setCustomers, clearAll } = useFilterStore()
@@ -20,9 +19,10 @@ export function FilterBar() {
       <Separator orientation="vertical" className="h-6" />
       <SearchableMultiSelect
         label="Vertical"
-        options={[...BUSINESS_VERTICALS]}
+        options={options.business_verticals}
         selected={filters.businessVerticals}
         onChange={setBusinessVerticals}
+        loading={isLoading}
       />
       <SearchableMultiSelect
         label="Product"
