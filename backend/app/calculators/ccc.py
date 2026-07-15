@@ -26,11 +26,15 @@ class TermNeedingReview(BaseModel):
     newly_auto_created: bool
 
 
-class InstrumentBifurcation(BaseModel):
-    instrument: str
+class GroupedDpo(BaseModel):
+    group: str
     po_value: float
     weighted_payable_days: float | None
     share_of_total_value_pct: float
+
+
+TERM_BUCKET_BINS = [-0.01, 30, 60, 90, 120, float("inf")]
+TERM_BUCKET_LABELS = ["0-30", "31-60", "61-90", "91-120", "120+"]
 
 
 class DpoResult(BaseModel):
@@ -41,7 +45,53 @@ class DpoResult(BaseModel):
     ar_ap_excluded_po_value: float
     ar_ap_excluded_po_count: int
     terms_needing_review: list[TermNeedingReview]
-    by_instrument: list[InstrumentBifurcation]
+    by_instrument: list[GroupedDpo]
+    by_month: list[GroupedDpo]
+    by_supplier: list[GroupedDpo]
+    by_business_unit: list[GroupedDpo]
+    by_term_bucket: list[GroupedDpo]
+
+
+def _grouped_breakdown(
+    value_series: pd.Series,
+    days_series: pd.Series,
+    group_series: pd.Series,
+    total_value: float,
+    top_n: int | None = None,
+) -> list[GroupedDpo]:
+    """Groups PO value + weighted payable days by an arbitrary category
+    series aligned to the same index (instrument, month, supplier, ...).
+    When `top_n` is set, the smallest groups by value are folded into
+    "Other" rather than silently omitted."""
+    frame = pd.DataFrame({"_value": value_series, "_days": days_series, "_group": group_series})
+    results: list[GroupedDpo] = []
+    for group, rows in frame.groupby("_group"):
+        group_value = float(rows["_value"].sum())
+        weighted_days = float((rows["_value"] * rows["_days"]).sum()) / group_value if group_value > 0 else None
+        results.append(
+            GroupedDpo(
+                group=str(group),
+                po_value=group_value,
+                weighted_payable_days=weighted_days,
+                share_of_total_value_pct=(group_value / total_value * 100) if total_value > 0 else 0.0,
+            )
+        )
+    results.sort(key=lambda r: r.po_value, reverse=True)
+
+    if top_n is not None and len(results) > top_n:
+        kept, folded = results[:top_n], results[top_n:]
+        other_value = sum(r.po_value for r in folded)
+        other_weighted = sum(r.po_value * (r.weighted_payable_days or 0) for r in folded)
+        kept.append(
+            GroupedDpo(
+                group="Other",
+                po_value=other_value,
+                weighted_payable_days=(other_weighted / other_value) if other_value > 0 else None,
+                share_of_total_value_pct=(other_value / total_value * 100) if total_value > 0 else 0.0,
+            )
+        )
+        return kept
+    return results
 
 
 class DsoResult(BaseModel):
@@ -61,6 +111,9 @@ def compute_dpo(
     db: Session,
     value_col: str,
     term_col: str,
+    month_series: pd.Series | None = None,
+    supplier_series: pd.Series | None = None,
+    business_unit_series: pd.Series | None = None,
 ) -> DpoResult:
     """DPO = SUM(PO Value x Payable Days) / SUM(PO Value).
 
@@ -72,6 +125,11 @@ def compute_dpo(
     a term explicitly flagged `excluded_from_dpo` (e.g. AR/AP Knock Off —
     a netting arrangement, not a real payable), are excluded and reported
     separately rather than silently dropped.
+
+    `month_series`/`supplier_series`/`business_unit_series` are optional,
+    already-derived grouping columns (aligned to `po_df`'s index) used to
+    build the corresponding breakdowns — kept out of this function's own
+    concern of parsing dates or knowing PO_Report's column names.
     """
     has_term = po_df[term_col].notna() & (po_df[term_col].astype(str).str.strip() != "")
     blank_df = po_df[~has_term]
@@ -104,20 +162,32 @@ def compute_dpo(
     dpo = weighted_days / total_value if total_value > 0 else None
 
     instrument_series = scoped_df[term_col].map(lambda t: resolved[t].instrument or "Unclassified")
-    by_instrument: list[InstrumentBifurcation] = []
-    for instrument, group in scoped_df.assign(_instrument=instrument_series).groupby("_instrument"):
-        group_value = float(group[value_col].sum())
-        group_days = days_series.loc[group.index]
-        group_weighted_days = float((group[value_col] * group_days).sum()) / group_value if group_value > 0 else None
-        by_instrument.append(
-            InstrumentBifurcation(
-                instrument=instrument,
-                po_value=group_value,
-                weighted_payable_days=group_weighted_days,
-                share_of_total_value_pct=(group_value / total_value * 100) if total_value > 0 else 0.0,
-            )
-        )
-    by_instrument.sort(key=lambda b: b.po_value, reverse=True)
+    by_instrument = _grouped_breakdown(scoped_df[value_col], days_series, instrument_series, total_value)
+
+    bucket_series = pd.cut(days_series, bins=TERM_BUCKET_BINS, labels=TERM_BUCKET_LABELS)
+    by_term_bucket = _grouped_breakdown(scoped_df[value_col], days_series, bucket_series, total_value)
+    # pd.cut orders by bucket, not value — restore the day-range order for a bucket table.
+    bucket_order = {label: i for i, label in enumerate(TERM_BUCKET_LABELS)}
+    by_term_bucket.sort(key=lambda r: bucket_order.get(r.group, len(TERM_BUCKET_LABELS)))
+
+    by_month = (
+        _grouped_breakdown(scoped_df[value_col], days_series, month_series.loc[scoped_df.index], total_value)
+        if month_series is not None
+        else []
+    )
+    by_month.sort(key=lambda r: r.group)  # chronological, not by value
+
+    by_supplier = (
+        _grouped_breakdown(scoped_df[value_col], days_series, supplier_series.loc[scoped_df.index], total_value, top_n=15)
+        if supplier_series is not None
+        else []
+    )
+
+    by_business_unit = (
+        _grouped_breakdown(scoped_df[value_col], days_series, business_unit_series.loc[scoped_df.index], total_value)
+        if business_unit_series is not None
+        else []
+    )
 
     return DpoResult(
         dpo=dpo,
@@ -128,6 +198,10 @@ def compute_dpo(
         ar_ap_excluded_po_count=int(len(ar_ap_df)),
         terms_needing_review=needing_review,
         by_instrument=by_instrument,
+        by_month=by_month,
+        by_supplier=by_supplier,
+        by_business_unit=by_business_unit,
+        by_term_bucket=by_term_bucket,
     )
 
 

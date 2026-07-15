@@ -153,4 +153,15 @@ def calculate_dpo(po_df: pd.DataFrame, db: Session, filters: CapitalFlowFilters 
         filtered = apply_global_filters(filtered, filters)
     filtered = filtered.copy()
     filtered[COL_PO_VALUE] = pd.to_numeric(filtered[COL_PO_VALUE], errors="coerce").fillna(0)
-    return compute_dpo(filtered, db, value_col=COL_PO_VALUE, term_col=COL_PAYMENT_TERM)
+
+    month_series = pd.to_datetime(filtered[COL_PO_DATE], format=PO_DATE_FORMAT).dt.strftime("%Y-%m")
+
+    return compute_dpo(
+        filtered,
+        db,
+        value_col=COL_PO_VALUE,
+        term_col=COL_PAYMENT_TERM,
+        month_series=month_series,
+        supplier_series=filtered[COL_SUPPLIER],
+        business_unit_series=filtered[COL_BUSINESS_VERTICAL],
+    )
