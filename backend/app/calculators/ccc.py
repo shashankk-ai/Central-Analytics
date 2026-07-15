@@ -146,9 +146,12 @@ def compute_dso(
     if invoice_df.empty:
         return DsoResult(dso=None, total_invoice_value=0.0)
 
+    # dayfirst=True: Scimplify's Zoho date columns are DD/MM/YYYY (confirmed
+    # for PO_Report's OrderDate) — without this, pandas' default MM/DD
+    # assumption silently swaps month/day for any day <= 12.
     as_of_ts = pd.Timestamp(as_of or datetime.now().date())
-    invoice_dates = pd.to_datetime(invoice_df[invoice_date_col])
-    collection_dates = pd.to_datetime(invoice_df[collection_date_col])
+    invoice_dates = pd.to_datetime(invoice_df[invoice_date_col], dayfirst=True)
+    collection_dates = pd.to_datetime(invoice_df[collection_date_col], dayfirst=True)
     end_dates = collection_dates.fillna(as_of_ts)
     days_outstanding = (end_dates - invoice_dates).dt.days
 

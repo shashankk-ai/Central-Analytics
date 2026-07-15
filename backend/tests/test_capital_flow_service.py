@@ -22,7 +22,7 @@ from app.services.excluded_vendors_service import upsert_seed_vendor
 from app.services.payment_terms_service import upsert_manual
 
 
-def _po_row(itemkey, pono, value=1000, term="30 Days PDC", vendor="Test Vendor", vertical="Pharma", product="Test Product", order_date="2026-01-01"):
+def _po_row(itemkey, pono, value=1000, term="30 Days PDC", vendor="Test Vendor", vertical="Pharma", product="Test Product", order_date="01/01/2026 00:00:00"):
     return {
         COL_PO_DATE: order_date,
         COL_PO_VALUE: value,
@@ -73,8 +73,8 @@ def test_apply_vendor_exclusion_drops_excluded_vendors(db_session):
 def test_apply_global_filters_by_date_vertical_product_supplier():
     po_df = pd.DataFrame(
         [
-            _po_row("ITEM1", "PO1", order_date="2026-01-15", vertical="Pharma", product="A", vendor="Vendor A"),
-            _po_row("ITEM2", "PO2", order_date="2026-02-15", vertical="Agro", product="B", vendor="Vendor B"),
+            _po_row("ITEM1", "PO1", order_date="15/01/2026 00:00:00", vertical="Pharma", product="A", vendor="Vendor A"),
+            _po_row("ITEM2", "PO2", order_date="15/02/2026 00:00:00", vertical="Agro", product="B", vendor="Vendor B"),
         ]
     )
 
@@ -89,6 +89,23 @@ def test_apply_global_filters_by_date_vertical_product_supplier():
 
     by_supplier = apply_global_filters(po_df, CapitalFlowFilters(suppliers=["Vendor A"]))
     assert len(by_supplier) == 1 and by_supplier.iloc[0][COL_PRODUCT] == "A"
+
+
+def test_apply_global_filters_parses_ambiguous_day_first_dates_correctly():
+    # OrderDate is DD/MM/YYYY. "03/07/2026" is 3 July — pandas' default
+    # (US-style MM/DD) parsing would silently read it as 7 March instead,
+    # since day<=12 is ambiguous without an explicit format.
+    po_df = pd.DataFrame(
+        [
+            _po_row("ITEM1", "PO1", order_date="03/07/2026 00:00:00", product="July PO"),
+            _po_row("ITEM2", "PO2", order_date="07/03/2026 00:00:00", product="March PO"),
+        ]
+    )
+
+    july_only = apply_global_filters(po_df, CapitalFlowFilters(date_from="2026-07-01", date_to="2026-07-31"))
+
+    assert len(july_only) == 1
+    assert july_only.iloc[0][COL_PRODUCT] == "July PO"
 
 
 def test_calculate_dpo_applies_filter_then_computes(db_session):

@@ -90,10 +90,17 @@ def apply_vendor_exclusion(po_df: pd.DataFrame, db: Session) -> pd.DataFrame:
     return po_df[~is_excluded]
 
 
+PO_DATE_FORMAT = "%d/%m/%Y %H:%M:%S"
+
+
 def apply_global_filters(po_df: pd.DataFrame, filters: CapitalFlowFilters) -> pd.DataFrame:
     mask = pd.Series(True, index=po_df.index)
     if filters.date_from or filters.date_to:
-        order_dates = pd.to_datetime(po_df[COL_PO_DATE], errors="coerce")
+        # OrderDate is DD/MM/YYYY — pandas' default parser assumes MM/DD and
+        # would silently swap month/day for any day <= 12 without an
+        # explicit format. Verified against the live PO_Report export that
+        # every row matches this exact format (2026-07-15).
+        order_dates = pd.to_datetime(po_df[COL_PO_DATE], format=PO_DATE_FORMAT)
         if filters.date_from:
             mask &= order_dates >= pd.Timestamp(filters.date_from)
         if filters.date_to:
