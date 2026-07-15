@@ -6,8 +6,8 @@ export interface TermNeedingReview {
   newly_auto_created: boolean
 }
 
-export interface InstrumentBifurcation {
-  instrument: string
+export interface GroupedDpo {
+  group: string
   po_value: number
   weighted_payable_days: number | null
   share_of_total_value_pct: number
@@ -21,7 +21,11 @@ export interface DpoResult {
   ar_ap_excluded_po_value: number
   ar_ap_excluded_po_count: number
   terms_needing_review: TermNeedingReview[]
-  by_instrument: InstrumentBifurcation[]
+  by_instrument: GroupedDpo[]
+  by_month: GroupedDpo[]
+  by_supplier: GroupedDpo[]
+  by_business_unit: GroupedDpo[]
+  by_term_bucket: GroupedDpo[]
 }
 
 export interface PaymentTermOut {
