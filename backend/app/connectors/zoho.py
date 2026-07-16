@@ -33,6 +33,7 @@ class ZohoAnalyticsConnector:
         self._settings = settings
         self._access_token: str | None = None
         self._access_token_expires_at: float = 0.0
+        self._token_lock = asyncio.Lock()
 
     async def _fetch_access_token(self) -> str:
         settings = self._settings
@@ -65,9 +66,15 @@ class ZohoAnalyticsConnector:
         return self._access_token
 
     async def _get_access_token(self) -> str:
-        if self._access_token is None or time.monotonic() >= self._access_token_expires_at:
+        if self._access_token is not None and time.monotonic() < self._access_token_expires_at:
+            return self._access_token
+        # Serialize refreshes: without this, several requests arriving with
+        # an expired token would each kick off their own token exchange,
+        # which is exactly what tripped Zoho's "too many requests" throttle.
+        async with self._token_lock:
+            if self._access_token is not None and time.monotonic() < self._access_token_expires_at:
+                return self._access_token
             return await self._fetch_access_token()
-        return self._access_token
 
     async def _request(self, method: str, path: str, **kwargs) -> httpx.Response:
         settings = self._settings
@@ -146,3 +153,19 @@ class ZohoAnalyticsConnector:
         )
         payload = data_response.json()
         return payload.get("data", [])
+
+
+_shared_connector: ZohoAnalyticsConnector | None = None
+
+
+def get_shared_connector(settings: Settings) -> ZohoAnalyticsConnector:
+    """A process-wide singleton connector so its access-token cache is
+    actually shared across requests. Creating a fresh connector per
+    request (as every API route used to) meant the token cache was
+    useless — each request re-exchanged the refresh token for a new
+    access token, and enough of those in a short window tripped Zoho's
+    OAuth rate limit ("You have made too many requests continuously")."""
+    global _shared_connector
+    if _shared_connector is None:
+        _shared_connector = ZohoAnalyticsConnector(settings)
+    return _shared_connector

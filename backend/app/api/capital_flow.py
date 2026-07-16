@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.calculators.ccc import DpoResult
-from app.connectors.zoho import ZohoAnalyticsConnector
+from app.connectors.zoho import get_shared_connector
 from app.models.db import get_db
 from app.services.capital_flow_service import CapitalFlowFilters, calculate_dpo, fetch_po_report
 from config.settings import Settings, get_settings
@@ -22,7 +22,7 @@ async def get_dpo(
     products: list[str] = Query([]),
     suppliers: list[str] = Query([]),
 ):
-    connector = ZohoAnalyticsConnector(settings)
+    connector = get_shared_connector(settings)
     po_df = await fetch_po_report(connector)
     filters = CapitalFlowFilters(
         date_from=date_from,

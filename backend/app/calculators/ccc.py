@@ -152,11 +152,23 @@ def compute_dpo(
                 )
             )
 
-    is_ar_ap_excluded = with_term_df[term_col].map(lambda t: resolved[t].excluded_from_dpo)
+    # .astype(bool) matters when with_term_df is empty (e.g. a filter
+    # combination matches zero rows): .map() on an empty Series infers
+    # dtype "object" rather than "bool", and boolean-masking a DataFrame
+    # with an object-dtype empty Series silently drops every column
+    # instead of rows, which then blows up the next line with a
+    # KeyError on term_col — surfacing to the user as the whole page
+    # going blank for a legitimate (if empty) filter selection.
+    is_ar_ap_excluded = with_term_df[term_col].map(lambda t: resolved[t].excluded_from_dpo).astype(bool)
     ar_ap_df = with_term_df[is_ar_ap_excluded]
     scoped_df = with_term_df[~is_ar_ap_excluded]
 
-    days_series = scoped_df[term_col].map(lambda t: resolved[t].weighted_payable_days)
+    # .astype(float) matters for the same empty-result case as above:
+    # pandas infers a "str" dtype (not "object") for an empty .map()
+    # result, and summing an empty str-dtype Series returns "" rather
+    # than 0 — which then blows up float(...) below with a ValueError
+    # for the same legitimate "filters matched zero rows" case.
+    days_series = scoped_df[term_col].map(lambda t: resolved[t].weighted_payable_days).astype(float)
     total_value = float(scoped_df[value_col].sum())
     weighted_days = float((scoped_df[value_col] * days_series).sum())
     dpo = weighted_days / total_value if total_value > 0 else None

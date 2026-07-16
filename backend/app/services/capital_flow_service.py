@@ -138,12 +138,22 @@ def get_base_filtered_po_df(po_df: pd.DataFrame, db: Session) -> pd.DataFrame:
     return apply_vendor_exclusion(filtered, db)
 
 
+def _distinct_non_blank(series: pd.Series) -> list[str]:
+    """Distinct values as a sorted list, excluding null/blank/whitespace-only
+    entries — those aren't a real filterable option and, worse, render as an
+    invisible-but-clickable row that silently filters to zero rows. Keeps
+    the original (unstripped) string so it still matches exactly against
+    the source column later via `.isin(...)`."""
+    values = series.dropna().astype(str)
+    return sorted({v for v in values if v.strip()})
+
+
 def get_filter_options(po_df: pd.DataFrame, db: Session) -> FilterOptions:
     base = get_base_filtered_po_df(po_df, db)
     return FilterOptions(
-        business_verticals=sorted(base[COL_BUSINESS_VERTICAL].dropna().astype(str).unique().tolist()),
-        products=sorted(base[COL_PRODUCT].dropna().astype(str).unique().tolist()),
-        suppliers=sorted(base[COL_SUPPLIER].dropna().astype(str).unique().tolist()),
+        business_verticals=_distinct_non_blank(base[COL_BUSINESS_VERTICAL]),
+        products=_distinct_non_blank(base[COL_PRODUCT]),
+        suppliers=_distinct_non_blank(base[COL_SUPPLIER]),
     )
 
 

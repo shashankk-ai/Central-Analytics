@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.connectors.zoho import ZohoAnalyticsConnector, ZohoApiError, ZohoAuthError
+from app.connectors.zoho import ZohoApiError, ZohoAuthError, get_shared_connector
 from config.settings import get_settings
 
 router = APIRouter(prefix="/health", tags=["health"])
@@ -14,7 +14,7 @@ async def check_zoho_connection() -> dict:
     build brief's environment-setup requirement.
     """
     settings = get_settings()
-    connector = ZohoAnalyticsConnector(settings)
+    connector = get_shared_connector(settings)
     try:
         await connector.verify_connection()
     except (ZohoAuthError, ZohoApiError) as exc:

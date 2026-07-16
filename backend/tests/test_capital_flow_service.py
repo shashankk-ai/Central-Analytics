@@ -159,6 +159,36 @@ def test_calculate_dpo_with_active_vertical_filter(db_session):
     assert result.total_po_value == pytest.approx(100_000)
 
 
+def test_calculate_dpo_returns_empty_result_when_filters_match_no_rows(db_session):
+    """Regression test: a filter combination that matches zero rows (e.g.
+    a product that doesn't exist under the selected vertical) used to crash
+    with a KeyError/ValueError instead of returning an empty result — which
+    surfaced to the user as the whole page going blank on a legitimate,
+    just-empty filter selection."""
+    upsert_manual(
+        db_session,
+        PaymentTermUpsert(terms_description="30 Days PDC", instrument="Clean Credit", weighted_payable_days=30),
+    )
+
+    po_df = pd.DataFrame(
+        [_po_row("ITEM1", "PO1", value=100_000, term="30 Days PDC", vertical="Pharma", product="Widget")]
+    )
+
+    result = calculate_dpo(
+        po_df,
+        db_session,
+        filters=CapitalFlowFilters(business_verticals=["Pharma"], products=["Nonexistent Product"]),
+    )
+
+    assert result.dpo is None
+    assert result.total_po_value == 0.0
+    assert result.by_instrument == []
+    assert result.by_month == []
+    assert result.by_supplier == []
+    assert result.by_business_unit == []
+    assert result.by_term_bucket == []
+
+
 def test_get_filter_options_excludes_vendor_list_rows(db_session):
     upsert_seed_vendor(db_session, vendor_name="Excluded Co", reason="Job-work (JW) vendor")
 
@@ -174,3 +204,18 @@ def test_get_filter_options_excludes_vendor_list_rows(db_session):
     assert options.suppliers == ["Vendor A"]
     assert options.business_verticals == ["Pharma"]
     assert options.products == ["Widget"]
+
+
+def test_get_filter_options_excludes_blank_and_whitespace_values(db_session):
+    po_df = pd.DataFrame(
+        [
+            _po_row("ITEM1", "PO1", product="", vertical="", vendor=" "),
+            _po_row("ITEM2", "PO2", product="Widget", vertical="Pharma", vendor="Vendor A"),
+        ]
+    )
+
+    options = get_filter_options(po_df, db_session)
+
+    assert options.products == ["Widget"]
+    assert options.business_verticals == ["Pharma"]
+    assert options.suppliers == ["Vendor A"]

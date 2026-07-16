@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Check, ChevronDown, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -15,15 +15,40 @@ interface SearchableMultiSelectProps {
   loading?: boolean
 }
 
+// Rendering every option unconditionally (rather than letting a search
+// query narrow what's mounted) is fine for a handful of items but falls
+// over for a list of thousands (products, suppliers) — thousands of DOM
+// nodes for a single dropdown is what "glitchy" was actually pointing at.
+const MAX_RENDERED_OPTIONS = 50
+
 export function SearchableMultiSelect({ label, options, selected, onChange, placeholder, loading }: SearchableMultiSelectProps) {
   const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return options.slice(0, MAX_RENDERED_OPTIONS)
+    return options.filter((o) => o.toLowerCase().includes(q)).slice(0, MAX_RENDERED_OPTIONS)
+  }, [options, query])
+
+  const totalMatches = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return options.length
+    return options.filter((o) => o.toLowerCase().includes(q)).length
+  }, [options, query])
 
   function toggle(value: string) {
     onChange(selected.includes(value) ? selected.filter((v) => v !== value) : [...selected, value])
   }
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next)
+        if (!next) setQuery('')
+      }}
+    >
       <PopoverTrigger
         aria-expanded={open}
         render={
@@ -45,12 +70,16 @@ export function SearchableMultiSelect({ label, options, selected, onChange, plac
         <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-50" />
       </PopoverTrigger>
       <PopoverContent className="w-64 p-0" align="start">
-        <Command>
-          <CommandInput placeholder={placeholder ?? `Search ${label.toLowerCase()}...`} />
+        <Command shouldFilter={false}>
+          <CommandInput
+            placeholder={placeholder ?? `Search ${label.toLowerCase()}...`}
+            value={query}
+            onValueChange={setQuery}
+          />
           <CommandList>
             <CommandEmpty>{loading ? 'Loading…' : 'No results found.'}</CommandEmpty>
             <CommandGroup>
-              {options.map((option) => {
+              {filtered.map((option) => {
                 const isSelected = selected.includes(option)
                 return (
                   <CommandItem key={option} onSelect={() => toggle(option)}>
@@ -67,6 +96,11 @@ export function SearchableMultiSelect({ label, options, selected, onChange, plac
                 )
               })}
             </CommandGroup>
+            {totalMatches > MAX_RENDERED_OPTIONS && (
+              <div className="px-2 py-1.5 text-center text-[11px] text-muted-foreground">
+                Showing {MAX_RENDERED_OPTIONS} of {totalMatches} — keep typing to narrow it down
+              </div>
+            )}
           </CommandList>
           {selected.length > 0 && (
             <div className="flex items-center justify-between border-t border-border/60 px-2 py-1.5">
